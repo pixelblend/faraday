@@ -54,7 +54,8 @@ module Faraday
       @headers.update options[:headers] if options[:headers]
 
       @proxy = nil
-      proxy(options.fetch(:proxy) { ENV['http_proxy'] })
+
+      proxy(options.fetch(:proxy) { env_proxy(url) })
 
       yield self if block_given?
 
@@ -180,6 +181,37 @@ module Faraday
       end
 
       @proxy
+    end
+
+    def env_proxy(url = nil)
+      @env_proxy = ENV['http_proxy']
+
+      if ENV['http_proxy'] && ENV['no_proxy'] && url
+        # remove the default proxy setting if there is a no_proxy entry for this url
+        uri = URI(url)
+
+        ENV['no_proxy'].split(',').each do |no_proxy_domain|
+          # ignore wildcards in domain
+          no_proxy_domain = no_proxy_domain.gsub('*.','')
+          no_proxy_domain = URI('http://'+no_proxy_domain)
+          
+          if no_proxy_domain.port != 80
+            # need to match on specific port
+            uri_pattern       = "#{uri.host}:#{uri.port}"
+            no_proxy_pattern  = "#{no_proxy_domain.host}:#{no_proxy_domain.port}"
+          else
+            uri_pattern       = uri.host
+            no_proxy_pattern  = no_proxy_domain.host
+          end
+          
+          if uri_pattern.match(/#{Regexp.quote(no_proxy_pattern)}$/i)
+            @env_proxy = nil
+            break
+          end
+        end
+      end
+      
+      @env_proxy
     end
 
     # normalize URI() behavior across Ruby versions

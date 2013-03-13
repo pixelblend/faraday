@@ -2,21 +2,26 @@ require File.expand_path(File.join(File.dirname(__FILE__), 'helper'))
 require 'uri'
 
 class TestConnection < Faraday::TestCase
+  def with_env(*keys_and_proxies)
+    old_values = {}
+    keys_and_proxies.each_slice(2) do |key, proxy|
+      old_values[key] = ENV.fetch(key, false)
+      ENV[key] = proxy
+    end
 
-  def with_env(key, proxy)
-    old_value = ENV.fetch(key, false)
-    ENV[key] = proxy
     begin
       yield
     ensure
-      if old_value == false
-        ENV.delete key
-      else
-        ENV[key] = old_value
+      old_values.each do |key, old_value|
+        if old_value == false
+          ENV.delete key
+        else
+          ENV[key] = old_value
+        end
       end
     end
   end
-
+  
   def test_initialize_parses_host_out_of_given_url
     conn = Faraday::Connection.new "http://sushi.com"
     assert_equal 'sushi.com', conn.host
@@ -305,6 +310,41 @@ class TestConnection < Faraday::TestCase
     }
     assert_equal 1, conn.builder.handlers.size
     assert_equal '/omnom', conn.path_prefix
+  end
+
+  def test_proxy_ignores_http_env_when_domain_matches_no_proxy
+    with_env 'http_proxy', "http://duncan.proxy.com:80", 'no_proxy', 'proxy.com,sushi.com,bbc.co.uk' do
+      conn = Faraday::Connection.new 'http://sushi.com/foo'
+      assert_equal nil, conn.proxy
+    end
+  end
+
+  def test_proxy_ignores_http_env_when_top_level_matches_no_proxy
+    with_env 'http_proxy', "http://duncan.proxy.com:80", 'no_proxy', 'proxy.com,sushi.com,bbc.co.uk' do
+      conn = Faraday::Connection.new 'http://beta.sushi.com/foo'
+      assert_equal nil, conn.proxy
+    end
+  end
+
+  def test_proxy_ignores_http_env_when_port_is_not_specified_in_no_proxy
+    with_env 'http_proxy', "http://duncan.proxy.com:80", 'no_proxy', 'proxy.com,sushi.com,bbc.co.uk' do
+      conn = Faraday::Connection.new 'http://beta.sushi.com:8080/foo'
+      assert_equal nil, conn.proxy
+    end
+  end
+
+  def test_proxy_ignores_http_env_when_port_matches_in_no_proxy
+    with_env 'http_proxy', "http://duncan.proxy.com:80", 'no_proxy', 'proxy.com,sushi.com:8080,bbc.co.uk' do
+      conn = Faraday::Connection.new 'http://beta.sushi.com:8080/foo'
+      assert_equal nil, conn.proxy
+    end
+  end
+
+  def test_proxy_sets_http_env_when_port_does_not_match_in_no_proxy
+    with_env 'http_proxy', "http://duncan.proxy.com:80", 'no_proxy', 'proxy.com,sushi.com:8080,bbc.co.uk' do
+      conn = Faraday::Connection.new 'http://beta.sushi.com/foo'
+      assert_equal 'duncan.proxy.com', conn.proxy[:uri].host
+    end
   end
 end
 
